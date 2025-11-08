@@ -83,8 +83,8 @@ class ClassroomConfig:
     openai_model: str = "gpt-4-turbo"
     deepgram_api_key: str
 
-    # 数据库和Redis
-    database_url: str
+    # 数据库 (MySQL 8) 和Redis
+    database_url: str  # mysql+pymysql://user:pass@localhost/ai_teaching
     redis_url: str
 
 
@@ -607,7 +607,7 @@ async def main():
         deepgram_api_key=os.getenv("DEEPGRAM_API_KEY", ""),
 
         # 数据库和Redis
-        database_url=os.getenv("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost/ai_teaching"),
+        database_url=os.getenv("DATABASE_URL", "mysql+aiomysql://user:pass@localhost/ai_teaching?charset=utf8mb4"),
         redis_url=os.getenv("REDIS_URL", "redis://localhost:6379"),
     )
 

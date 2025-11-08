@@ -78,7 +78,7 @@
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                       数据层 (Data Layer)                                 │
 ├─────────────────────────────────────────────────────────────────────────┤
-│  PostgreSQL 15 (Primary + 2 Replicas)                                   │
+│  MySQL 8.0 (Primary + 2 Replicas)                                       │
 │  ┌──────────────────┐  ┌──────────────────┐                            │
 │  │  Primary (写)     │  │  Replica (读)     │                            │
 │  │  - 用户数据       │  │  - 查询负载       │                            │
@@ -86,8 +86,8 @@
 │  │  - 消息记录       │  │  - 报表生成       │                            │
 │  └──────────────────┘  └──────────────────┘                            │
 │                                                                          │
-│  pgvector Extension (向量搜索)                                            │
-│  TimescaleDB Extension (时序数据)                                         │
+│  InnoDB引擎 (事务支持)                                                     │
+│  JSON原生支持 (灵活数据)                                                   │
 └────────┬────────────────────────────────────────────────────────────────┘
          │
          ▼
@@ -319,27 +319,29 @@ class BotManager:
 
 ---
 
-### 4. 数据库设计 (PostgreSQL)
+### 4. 数据库设计 (MySQL 8)
 
 **主从架构**:
 - 1个主节点 (写操作)
 - 2个从节点 (读操作)
-- Streaming Replication (流复制)
-- 自动故障转移 (Patroni + etcd)
+- GTID复制 (全局事务ID)
+- 自动故障转移 (MHA或Orchestrator)
 
 **分区策略**:
 ```sql
 -- 按月分区消息表
 CREATE TABLE conversation_messages (
-    id UUID,
-    classroom_id UUID,
+    id CHAR(36),
+    classroom_id CHAR(36),
     content TEXT,
-    created_at TIMESTAMP
-) PARTITION BY RANGE (created_at);
-
-CREATE TABLE conversation_messages_2024_11
-    PARTITION OF conversation_messages
-    FOR VALUES FROM ('2024-11-01') TO ('2024-12-01');
+    created_at TIMESTAMP,
+    PRIMARY KEY (id, created_at)
+) ENGINE=InnoDB
+PARTITION BY RANGE (YEAR(created_at) * 100 + MONTH(created_at)) (
+    PARTITION p202411 VALUES LESS THAN (202412),
+    PARTITION p202412 VALUES LESS THAN (202501),
+    PARTITION p_future VALUES LESS THAN MAXVALUE
+);
 ```
 
 **索引优化**:
@@ -348,21 +350,20 @@ CREATE TABLE conversation_messages_2024_11
 CREATE INDEX idx_classrooms_student_status
     ON classrooms(student_id, status, scheduled_start_at);
 
--- 部分索引
-CREATE INDEX idx_classrooms_active
-    ON classrooms(id, student_id)
-    WHERE status = 'active';
+-- 函数索引 (MySQL 8.0.13+)
+CREATE INDEX idx_classrooms_email_lower
+    ON classrooms((LOWER(email)));
 
--- GIN索引 (JSONB)
-CREATE INDEX idx_classrooms_metadata
-    ON classrooms USING GIN(metadata);
+-- 全文索引
+CREATE FULLTEXT INDEX idx_classrooms_content
+    ON classrooms(name, description);
 ```
 
 **连接池配置**:
 ```python
-# SQLAlchemy
+# SQLAlchemy with MySQL
 engine = create_engine(
-    DATABASE_URL,
+    "mysql+pymysql://user:pass@localhost/ai_teaching?charset=utf8mb4",
     pool_size=20,
     max_overflow=40,
     pool_pre_ping=True,
@@ -688,10 +689,10 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql://user:pass@postgres:5432/ai_teaching
+      DATABASE_URL: mysql+pymysql://user:pass@mysql:3306/ai_teaching?charset=utf8mb4
       REDIS_URL: redis://redis:6379
     depends_on:
-      - postgres
+      - mysql
       - redis
     volumes:
       - ./api-server:/app
@@ -719,17 +720,19 @@ services:
     depends_on:
       - redis
 
-  # PostgreSQL
-  postgres:
-    image: postgres:15-alpine
+  # MySQL
+  mysql:
+    image: mysql:8.0
     ports:
-      - "5432:5432"
+      - "3306:3306"
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: pass
-      POSTGRES_DB: ai_teaching
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: ai_teaching
+      MYSQL_USER: user
+      MYSQL_PASSWORD: pass
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - mysql_data:/var/lib/mysql
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
 
   # Redis
@@ -763,7 +766,7 @@ services:
       - frontend
 
 volumes:
-  postgres_data:
+  mysql_data:
   redis_data:
 ```
 
@@ -917,7 +920,7 @@ sentry_sdk.init(
 
 **云服务 (AWS)**:
 - EC2 (Kubernetes工作节点): $2,000
-- RDS PostgreSQL: $500
+- RDS MySQL 8.0: $500
 - ElastiCache Redis: $300
 - S3存储: $200
 - 负载均衡器: $100

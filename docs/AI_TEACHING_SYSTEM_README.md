@@ -90,7 +90,7 @@
 
 - Python 3.11+
 - Node.js 18+
-- PostgreSQL 15+
+- MySQL 8.0+
 - Redis 7+
 - Docker & Docker Compose (可选)
 
@@ -120,7 +120,7 @@ npm install
 
 ```env
 # 数据库
-DATABASE_URL=postgresql://user:pass@localhost:5432/ai_teaching
+DATABASE_URL=mysql+pymysql://user:pass@localhost:3306/ai_teaching?charset=utf8mb4
 REDIS_URL=redis://localhost:6379
 
 # AI服务
@@ -140,7 +140,7 @@ ENVIRONMENT=development
 
 ```bash
 # 创建数据库
-createdb ai_teaching
+mysql -u root -p -e "CREATE DATABASE ai_teaching CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 
 # 运行迁移
 alembic upgrade head
@@ -228,7 +228,7 @@ npm run dev
 ### 后端
 - **框架**: FastAPI, Pipecat
 - **语言**: Python 3.11+
-- **数据库**: PostgreSQL 15, Redis 7
+- **数据库**: MySQL 8.0, Redis 7
 - **ORM**: SQLAlchemy 2.0
 - **消息队列**: RabbitMQ / AWS SQS
 
